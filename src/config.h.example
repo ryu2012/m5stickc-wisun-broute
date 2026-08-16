@@ -1,0 +1,43 @@
+#ifndef CONFIG_H
+#define CONFIG_H
+
+// ==========================================
+// 1. スマートメーター Bルート認証情報
+// ==========================================
+// 電力会社発行の 32桁 ID & 12桁 パスワードを入力してください
+#define BROUTE_ID       "00000000000000000000000000000000"
+#define BROUTE_PASSWORD "YOUR_PASSWORD"
+
+// ==========================================
+// 2. Wi-Fi 設定
+// ==========================================
+#define WIFI_SSID       "YOUR_WIFI_SSID"
+#define WIFI_PASSWORD   "YOUR_WIFI_PASSWORD"
+#define ENABLE_WIFI_AP  false
+#define AP_SSID         "M5-PowerMeter"
+#define AP_PASS         "12345678"
+
+// ==========================================
+// 3. Wi-SUN HAT (Rev0.1) ピンアサイン
+// ==========================================
+// M5StickC Plus + Wi-SUN HAT Rev0.1 仕様:
+// TX: GPIO0, RX: GPIO36
+#define WISUN_TX_PIN    0
+#define WISUN_RX_PIN    36
+#define WISUN_BAUD      115200
+
+// ==========================================
+// 4. データ計測 & ブレーカー警告上限
+// ==========================================
+#define FETCH_INTERVAL_SEC  5
+#define AMPERE_LIMIT_WATT   4000  // ご契約アンペア(W換算: 40A=4000)
+#define WARNING_RATIO       0.8f  // 80%で警告音・色変更
+
+// ==========================================
+// 5. Ambient 連携設定 (オプション)
+// ==========================================
+#define ENABLE_AMBIENT      false
+#define AMBIENT_CHANNEL_ID  0
+#define AMBIENT_WRITE_KEY   "YOUR_WRITE_KEY"
+
+#endif // CONFIG_H
