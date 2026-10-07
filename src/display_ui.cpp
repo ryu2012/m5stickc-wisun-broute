@@ -80,10 +80,10 @@ void DisplayUI::update(BrouteState state, const PowerData& data, double monthlyK
 
     bool isPopupActive = (now < _popupUntilMs);
 
-    // 1. ポップアップ表示モード（BtnA 押下時：画面全体をすっきりオーバーレイ）
+    // 1. ポップアップ表示モード（BtnA 押下時）
     if (isPopupActive) {
-        _canvas->fillScreen(_canvas->color565(15, 23, 42)); // 背景一括クリア
-        _canvas->drawRoundRect(4, 4, w - 8, h - 8, 8, _canvas->color565(56, 189, 248)); // シアン枠線
+        _canvas->fillScreen(_canvas->color565(15, 23, 42));
+        _canvas->drawRoundRect(4, 4, w - 8, h - 8, 8, _canvas->color565(56, 189, 248));
 
         time_t nowTime;
         time(&nowTime);
@@ -123,7 +123,6 @@ void DisplayUI::update(BrouteState state, const PowerData& data, double monthlyK
         int centerX = w / 2 - 12;
         _canvas->drawString(kwhMainStr, centerX, 52);
 
-        // 単位「kWh」
         _canvas->setTextDatum(BL_DATUM);
         _canvas->setTextColor(_canvas->color565(167, 139, 250));
         _canvas->setTextSize(1.5);
@@ -137,7 +136,7 @@ void DisplayUI::update(BrouteState state, const PowerData& data, double monthlyK
         snprintf(periodLabel, sizeof(periodLabel), "Date range: %s", periodStr ? periodStr : "23rd - 22nd");
         _canvas->drawString(periodLabel, w / 2, 84);
 
-        // ④ 最下部：Web URL（ベゼル枠に被らない安全なY座標）
+        // ④ 最下部：Web URL
         _canvas->setTextDatum(MC_DATUM);
         _canvas->setTextColor(_canvas->color565(52, 211, 153));
         _canvas->setTextSize(1.0);
@@ -149,7 +148,7 @@ void DisplayUI::update(BrouteState state, const PowerData& data, double monthlyK
         return;
     }
 
-    // 2. メイン通常表示モード (新アラート設計)
+    // 2. メイン通常表示モード (相別強調アラート設計)
     float loadRatio = (data.validInstantaneous) ? ((float)data.instantaneousWatt / (float)AMPERE_LIMIT_WATT) : 0.0f;
     int loadPercent = (int)(loadRatio * 100.0f);
 
@@ -160,33 +159,45 @@ void DisplayUI::update(BrouteState state, const PowerData& data, double monthlyK
     float ratioR = (float)wattR / (float)phaseLimit;
     float ratioT = (float)wattT / (float)phaseLimit;
 
-    // 新閾値判定 (Danger: >=95%, Warning: >=85%, Caution: >=75%)
-    bool isDanger  = (loadRatio >= 0.95f || ratioR >= 0.95f || ratioT >= 0.95f);
-    bool isWarning = (!isDanger && (loadRatio >= 0.85f || ratioR >= 0.85f || ratioT >= 0.85f));
-    bool isCaution = (!isDanger && !isWarning && (loadRatio >= 0.75f || ratioR >= 0.75f || ratioT >= 0.75f));
+    // 危険レベル判定
+    bool isDangerR  = (ratioR >= 0.95f);
+    bool isWarningR = (!isDangerR && ratioR >= 0.85f);
+    bool isCautionR = (!isDangerR && !isWarningR && ratioR >= 0.75f);
+
+    bool isDangerT  = (ratioT >= 0.95f);
+    bool isWarningT = (!isDangerT && ratioT >= 0.85f);
+    bool isCautionT = (!isDangerT && !isWarningT && ratioT >= 0.75f);
+
+    bool isDangerTotal  = (loadRatio >= 0.95f);
+    bool isWarningTotal = (!isDangerTotal && loadRatio >= 0.85f);
+    bool isCautionTotal = (!isDangerTotal && !isWarningTotal && loadRatio >= 0.75f);
+
+    bool isDanger  = (isDangerTotal || isDangerR || isDangerT);
+    bool isWarning = (!isDanger && (isWarningTotal || isWarningR || isWarningT));
+    bool isCaution = (!isDanger && !isWarning && (isCautionTotal || isCautionR || isCautionT));
 
     // ブザー制御
     if (isDanger && _beepEnabled && (now - _lastBeepMs > 1000)) {
         _lastBeepMs = now;
-        M5.Speaker.tone(2800, 250); // 危険: 連続高音
+        M5.Speaker.tone(2800, 250);
     } else if (isWarning && _beepEnabled && (now - _lastBeepMs > 3000)) {
         _lastBeepMs = now;
-        M5.Speaker.tone(2000, 120); // 警告: 控えめな単音
+        M5.Speaker.tone(2000, 120);
     }
 
-    // 背景描画
-    if (isDanger && (now / 350) % 2 == 0) {
-        _canvas->fillScreen(_canvas->color565(120, 15, 15)); // 赤点滅フラッシュ
+    // 背景描画（全体が危険なときは全体赤点滅）
+    if (isDangerTotal && (now / 350) % 2 == 0) {
+        _canvas->fillScreen(_canvas->color565(120, 15, 15));
     } else {
         _canvas->fillScreen(TFT_BLACK);
     }
 
     if (state == BrouteState::CONNECTED && data.validInstantaneous) {
-        int splitX = 132;
+        int splitX = 126;
         bool hasAlert = (isDanger || isWarning || isCaution);
 
         // ----------------------------------------------------
-        // A. 外枠カラーフレーム (太さ 2px)
+        // A. 外枠カラーフレーム
         // ----------------------------------------------------
         if (isDanger) {
             _canvas->drawRect(0, 0, w, h, _canvas->color565(239, 68, 68));
@@ -209,8 +220,7 @@ void DisplayUI::update(BrouteState state, const PowerData& data, double monthlyK
                                 isWarning ? _canvas->color565(234, 88, 12) :
                                 _canvas->color565(202, 138, 4);
             
-            uint16_t bannerText = isDanger ? TFT_WHITE :
-                                  isWarning ? TFT_WHITE : TFT_BLACK;
+            uint16_t bannerText = (isCaution && !isDanger && !isWarning) ? TFT_BLACK : TFT_WHITE;
 
             _canvas->fillRect(2, 2, w - 4, 18, bannerBg);
             _canvas->setTextDatum(MC_DATUM);
@@ -218,18 +228,22 @@ void DisplayUI::update(BrouteState state, const PowerData& data, double monthlyK
             _canvas->setTextSize(1.0);
 
             char bannerMsg[48];
-            if (ratioR >= 0.95f) {
-                snprintf(bannerMsg, sizeof(bannerMsg), "!! DANGER: R-PHASE %.1fA (OVER) !!", (data.validCurrent ? data.currentRPhase : (wattR/100.0f)));
-            } else if (ratioT >= 0.95f) {
-                snprintf(bannerMsg, sizeof(bannerMsg), "!! DANGER: T-PHASE %.1fA (OVER) !!", (data.validCurrent ? data.currentTPhase : (wattT/100.0f)));
-            } else if (isDanger) {
+            if (isDangerR) {
+                snprintf(bannerMsg, sizeof(bannerMsg), "!! DANGER: R-PHASE %.1fA OVER !!", (data.validCurrent ? data.currentRPhase : (wattR/100.0f)));
+            } else if (isDangerT) {
+                snprintf(bannerMsg, sizeof(bannerMsg), "!! DANGER: T-PHASE %.1fA OVER !!", (data.validCurrent ? data.currentTPhase : (wattT/100.0f)));
+            } else if (isDangerTotal) {
                 snprintf(bannerMsg, sizeof(bannerMsg), "!! DANGER: %dW / %dA (%d%%) !!", data.instantaneousWatt, AMPERE_LIMIT_WATT/100, loadPercent);
-            } else if (ratioR >= 0.85f) {
+            } else if (isWarningR) {
                 snprintf(bannerMsg, sizeof(bannerMsg), "! WARN: R-PHASE %.1fA HIGH !", (data.validCurrent ? data.currentRPhase : (wattR/100.0f)));
-            } else if (ratioT >= 0.85f) {
+            } else if (isWarningT) {
                 snprintf(bannerMsg, sizeof(bannerMsg), "! WARN: T-PHASE %.1fA HIGH !", (data.validCurrent ? data.currentTPhase : (wattT/100.0f)));
-            } else if (isWarning) {
+            } else if (isWarningTotal) {
                 snprintf(bannerMsg, sizeof(bannerMsg), "! WARNING: %dW / %dA (%d%%) !", data.instantaneousWatt, AMPERE_LIMIT_WATT/100, loadPercent);
+            } else if (isCautionR) {
+                snprintf(bannerMsg, sizeof(bannerMsg), "CAUTION: R-PHASE %.1fA (75%%)", (data.validCurrent ? data.currentRPhase : (wattR/100.0f)));
+            } else if (isCautionT) {
+                snprintf(bannerMsg, sizeof(bannerMsg), "CAUTION: T-PHASE %.1fA (75%%)", (data.validCurrent ? data.currentTPhase : (wattT/100.0f)));
             } else {
                 snprintf(bannerMsg, sizeof(bannerMsg), "CAUTION: %dW / %dA (%d%%)", data.instantaneousWatt, AMPERE_LIMIT_WATT/100, loadPercent);
             }
@@ -240,9 +254,9 @@ void DisplayUI::update(BrouteState state, const PowerData& data, double monthlyK
         // C. 全体電力 (左エリア)
         // ----------------------------------------------------
         uint16_t mainColor = TFT_WHITE;
-        if (isDanger)       mainColor = _canvas->color565(255, 70, 70);
-        else if (isWarning) mainColor = _canvas->color565(251, 146, 60);
-        else if (isCaution) mainColor = _canvas->color565(250, 204, 21);
+        if (isDangerTotal)       mainColor = _canvas->color565(255, 70, 70);
+        else if (isWarningTotal) mainColor = _canvas->color565(251, 146, 60);
+        else if (isCautionTotal) mainColor = _canvas->color565(250, 204, 21);
 
         _canvas->setTextColor(mainColor);
         _canvas->setTextSize(3.8);
@@ -252,15 +266,15 @@ void DisplayUI::update(BrouteState state, const PowerData& data, double monthlyK
         snprintf(mainWattStr, sizeof(mainWattStr), "%d", data.instantaneousWatt);
         
         int textW = _canvas->textWidth(mainWattStr);
-        int startX = (splitX / 2) + (textW / 2) - 10;
+        int startX = (splitX / 2) + (textW / 2) - 8;
         int centerY = (h + topOffset - 16) / 2;
         
         _canvas->drawString(mainWattStr, startX, centerY);
 
         // 単位「W」
         _canvas->setTextDatum(BL_DATUM);
-        uint16_t unitColor = isDanger ? _canvas->color565(255, 80, 80) : 
-                             isWarning ? _canvas->color565(251, 146, 60) : _canvas->color565(52, 211, 153);
+        uint16_t unitColor = isDangerTotal ? _canvas->color565(255, 80, 80) : 
+                             isWarningTotal ? _canvas->color565(251, 146, 60) : _canvas->color565(52, 211, 153);
         _canvas->setTextColor(unitColor);
         _canvas->setTextSize(2.2);
         _canvas->drawString("w", startX + 4, centerY + 20);
@@ -272,49 +286,129 @@ void DisplayUI::update(BrouteState state, const PowerData& data, double monthlyK
         _canvas->drawFastVLine(splitX, sepTop, h - 22 - sepTop, _canvas->color565(50, 60, 80));
 
         // ----------------------------------------------------
-        // E. R相 / T相 (右エリア)
+        // E. R相 / T相 (右エリア: 強調警告カードボックス化)
         // ----------------------------------------------------
-        int rightH = h - topOffset - 22;
-        int rightMidY = topOffset + (rightH / 2);
+        int cardX = splitX + 5;
+        int cardW = w - cardX - 5;
+        int availableH = h - topOffset - 24;
+        int cardH = (availableH - 4) / 2;
+        int cardY_R = topOffset + 3;
+        int cardY_T = cardY_R + cardH + 4;
 
-        // R相
-        uint16_t colorR = getPowerColor(wattR);
-        _canvas->setTextDatum(ML_DATUM);
-        _canvas->setTextColor((ratioR >= 0.85f) ? colorR : _canvas->color565(180, 200, 240));
-        _canvas->setTextSize(2.0);
-        _canvas->drawString("R", splitX + 8, topOffset + (rightH / 4));
+        // --- R相カードの描画 ---
+        uint16_t bgR = _canvas->color565(18, 24, 38);       // デフォルト背景
+        uint16_t borderR = _canvas->color565(40, 50, 70);   // デフォルト枠線
+        uint16_t textColR = getPowerColor(wattR);
+        uint16_t tagBgR = _canvas->color565(30, 41, 59);
+        uint16_t tagTextR = _canvas->color565(56, 189, 248); // 水色
 
+        if (isDangerR) {
+            // 危険: 赤点滅または鮮烈な赤背景
+            bool blink = ((now / 350) % 2 == 0);
+            bgR = blink ? _canvas->color565(220, 38, 38) : _canvas->color565(120, 15, 15);
+            borderR = _canvas->color565(255, 100, 100);
+            textColR = TFT_WHITE;
+            tagBgR = TFT_BLACK;
+            tagTextR = _canvas->color565(255, 100, 100);
+        } else if (isWarningR) {
+            // 警告: 鮮やかなオレンジ枠 ＆ 濃いオレンジ背景
+            bgR = _canvas->color565(124, 45, 18);
+            borderR = _canvas->color565(249, 115, 22);
+            textColR = _canvas->color565(255, 237, 213);
+            tagBgR = _canvas->color565(234, 88, 12);
+            tagTextR = TFT_WHITE;
+        } else if (isCautionR) {
+            // 注意: 黄色枠
+            bgR = _canvas->color565(66, 48, 10);
+            borderR = _canvas->color565(234, 179, 8);
+            textColR = _canvas->color565(254, 240, 138);
+            tagBgR = _canvas->color565(202, 138, 4);
+            tagTextR = TFT_BLACK;
+        }
+
+        // R相カード背景＆枠
+        _canvas->fillRoundRect(cardX, cardY_R, cardW, cardH, 4, bgR);
+        _canvas->drawRoundRect(cardX, cardY_R, cardW, cardH, 4, borderR);
+        if (isDangerR || isWarningR) {
+            _canvas->drawRoundRect(cardX + 1, cardY_R + 1, cardW - 2, cardH - 2, 4, borderR); // 2重枠で太く
+        }
+
+        // R相タグ [ R ]
+        _canvas->fillRoundRect(cardX + 4, cardY_R + (cardH / 2) - 10, 18, 20, 3, tagBgR);
+        _canvas->setTextDatum(MC_DATUM);
+        _canvas->setTextColor(tagTextR);
+        _canvas->setTextSize(1.6);
+        _canvas->drawString("R", cardX + 13, cardY_R + (cardH / 2));
+
+        // R相数字
         _canvas->setTextDatum(MR_DATUM);
-        _canvas->setTextColor(colorR);
-        _canvas->setTextSize(2.8);
+        _canvas->setTextColor(textColR);
+        _canvas->setTextSize(2.4);
         char rStr[16];
         snprintf(rStr, sizeof(rStr), "%d", wattR);
-        _canvas->drawString(rStr, w - 24, topOffset + (rightH / 4));
+        _canvas->drawString(rStr, cardX + cardW - 18, cardY_R + (cardH / 2) - 1);
 
+        // 単位 W
         _canvas->setTextDatum(BL_DATUM);
-        _canvas->setTextSize(1.5);
-        _canvas->drawString("w", w - 20, topOffset + (rightH / 4) + 10);
+        _canvas->setTextColor((isDangerR || isWarningR) ? textColR : _canvas->color565(148, 163, 184));
+        _canvas->setTextSize(1.2);
+        _canvas->drawString("w", cardX + cardW - 15, cardY_R + (cardH / 2) + 7);
 
-        // 水平仕切り線
-        _canvas->drawFastHLine(splitX + 6, rightMidY, w - splitX - 12, _canvas->color565(50, 60, 80));
+        // --- T相カードの描画 ---
+        uint16_t bgT = _canvas->color565(18, 24, 38);
+        uint16_t borderT = _canvas->color565(40, 50, 70);
+        uint16_t textColT = getPowerColor(wattT);
+        uint16_t tagBgT = _canvas->color565(30, 41, 59);
+        uint16_t tagTextT = _canvas->color565(251, 191, 36); // アンバー
 
-        // T相
-        uint16_t colorT = getPowerColor(wattT);
-        _canvas->setTextDatum(ML_DATUM);
-        _canvas->setTextColor((ratioT >= 0.85f) ? colorT : _canvas->color565(180, 200, 240));
-        _canvas->setTextSize(2.0);
-        _canvas->drawString("T", splitX + 8, rightMidY + (rightH / 4));
+        if (isDangerT) {
+            bool blink = ((now / 350) % 2 == 0);
+            bgT = blink ? _canvas->color565(220, 38, 38) : _canvas->color565(120, 15, 15);
+            borderT = _canvas->color565(255, 100, 100);
+            textColT = TFT_WHITE;
+            tagBgT = TFT_BLACK;
+            tagTextT = _canvas->color565(255, 100, 100);
+        } else if (isWarningT) {
+            bgT = _canvas->color565(124, 45, 18);
+            borderT = _canvas->color565(249, 115, 22);
+            textColT = _canvas->color565(255, 237, 213);
+            tagBgT = _canvas->color565(234, 88, 12);
+            tagTextT = TFT_WHITE;
+        } else if (isCautionT) {
+            bgT = _canvas->color565(66, 48, 10);
+            borderT = _canvas->color565(234, 179, 8);
+            textColT = _canvas->color565(254, 240, 138);
+            tagBgT = _canvas->color565(202, 138, 4);
+            tagTextT = TFT_BLACK;
+        }
 
+        // T相カード背景＆枠
+        _canvas->fillRoundRect(cardX, cardY_T, cardW, cardH, 4, bgT);
+        _canvas->drawRoundRect(cardX, cardY_T, cardW, cardH, 4, borderT);
+        if (isDangerT || isWarningT) {
+            _canvas->drawRoundRect(cardX + 1, cardY_T + 1, cardW - 2, cardH - 2, 4, borderT); // 2重枠
+        }
+
+        // T相タグ [ T ]
+        _canvas->fillRoundRect(cardX + 4, cardY_T + (cardH / 2) - 10, 18, 20, 3, tagBgT);
+        _canvas->setTextDatum(MC_DATUM);
+        _canvas->setTextColor(tagTextT);
+        _canvas->setTextSize(1.6);
+        _canvas->drawString("T", cardX + 13, cardY_T + (cardH / 2));
+
+        // T相数字
         _canvas->setTextDatum(MR_DATUM);
-        _canvas->setTextColor(colorT);
-        _canvas->setTextSize(2.8);
+        _canvas->setTextColor(textColT);
+        _canvas->setTextSize(2.4);
         char tStr[16];
         snprintf(tStr, sizeof(tStr), "%d", wattT);
-        _canvas->drawString(tStr, w - 24, rightMidY + (rightH / 4));
+        _canvas->drawString(tStr, cardX + cardW - 18, cardY_T + (cardH / 2) - 1);
 
+        // 単位 W
         _canvas->setTextDatum(BL_DATUM);
-        _canvas->setTextSize(1.5);
-        _canvas->drawString("w", w - 20, rightMidY + (rightH / 4) + 10);
+        _canvas->setTextColor((isDangerT || isWarningT) ? textColT : _canvas->color565(148, 163, 184));
+        _canvas->setTextSize(1.2);
+        _canvas->drawString("w", cardX + cardW - 15, cardY_T + (cardH / 2) + 7);
 
         // ----------------------------------------------------
         // F. 最下部 (IP & 今月積算)
